@@ -26,11 +26,21 @@ variable "admin_password" {
   description = "Admin password (12-30 chars, must include uppercase, lowercase, number, and special char)"
   type        = string
   sensitive   = true
+
   validation {
-    condition     = can(regex("^(?=.{12,30}$)(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).*$", var.admin_password))
+    condition = (
+      length(var.admin_password) >= 12 &&
+      length(var.admin_password) <= 30 &&
+      can(regex("[a-z]", var.admin_password)) &&
+      can(regex("[A-Z]", var.admin_password)) &&
+      can(regex("[0-9]", var.admin_password)) &&
+      can(regex("[^A-Za-z0-9]", var.admin_password))
+    )
+
     error_message = "admin_password must be 12-30 chars and include uppercase, lowercase, number, and special character."
   }
 }
+
 
 variable "subnet_id" {
   description = "Azure subnet ID (must be delegated to Oracle.Database/networkAttachments)"
