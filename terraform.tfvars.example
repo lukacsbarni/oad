@@ -1,0 +1,88 @@
+# ========================================
+# Example terraform.tfvars
+# ========================================
+
+# Required variables
+name                = "proddb01"
+resource_group_name = "oracle-prod-rg"
+location            = "eastus"
+subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network-rg/providers/Microsoft.Network/virtualNetworks/prod-vnet/subnets/oracle-subnet"
+virtual_network_id  = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/network-rg/providers/Microsoft.Network/virtualNetworks/prod-vnet"
+
+# Password management - Option 1: Auto-generate
+generate_admin_password = true
+generated_password_length = 24
+
+# Password management - Option 2: Provide custom password (uncomment to use)
+# admin_password = "YourSecureP@ssw0rd123!"
+# generate_admin_password = false
+
+# Key Vault integration
+create_key_vault_secret = true
+key_vault_id            = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/security-rg/providers/Microsoft.KeyVault/vaults/prod-keyvault"
+key_vault_secret_name   = "oracle-db-admin-password"
+# key_vault_secret_expiration_date = "2027-12-31T00:00:00Z"
+
+# Database configuration
+display_name             = "Production Oracle Database"
+compute_model            = "ECPU"
+compute_count            = 4
+data_storage_size_in_tbs = 2
+db_version               = "19c"
+db_workload              = "OLTP"
+license_model            = "LicenseIncluded"
+
+# Auto-scaling
+auto_scaling_enabled             = true
+auto_scaling_for_storage_enabled = true
+
+# Backup configuration
+backup_retention_period_in_days = 30
+
+long_term_backup_schedules = [
+  {
+    repeat_cadence           = "Weekly"
+    time_of_backup           = "2026-03-01T02:00:00Z"
+    retention_period_in_days = 180
+    enabled                  = true
+  },
+  {
+    repeat_cadence           = "Monthly"
+    time_of_backup           = "2026-03-01T03:00:00Z"
+    retention_period_in_days = 365
+    enabled                  = true
+  }
+]
+
+# Character sets
+character_set          = "AL32UTF8"
+national_character_set = "AL16UTF16"
+
+# Network security
+mtls_connection_required = true
+allowed_ips = [
+  "10.0.0.0/8",      # Internal network
+  "203.0.113.0/24"   # Office network
+]
+create_nsg_for_allowed_ips = true
+
+# Maintenance contacts
+customer_contacts = [
+  "dba-team@example.com",
+  "ops-team@example.com"
+]
+
+# Tags
+tags = {
+  environment = "production"
+  application = "core-banking"
+  cost_center = "IT-001"
+  managed_by  = "terraform"
+  owner       = "dba-team"
+}
+
+# Additional Key Vault secret tags
+key_vault_secret_tags = {
+  secret_type = "database-credential"
+  rotation    = "annual"
+}

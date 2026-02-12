@@ -1,134 +1,450 @@
-# Oracle Autonomous Database on Azure – Terraform Module
+# Oracle Autonomous Database on Azure - Terraform Module
 
-Terraform module to provision **Oracle Autonomous Database@Azure** using the `azurerm_oracle_autonomous_database` resource.
+This Terraform module provisions an Oracle Autonomous Database on Azure with automatic password generation and Azure Key Vault integration.
 
 ## Features
 
-- Creates an Oracle Autonomous Database instance on Azure
-- Supports compute + storage sizing and autoscaling
-- Configurable backups and maintenance notification contacts
-- Optional IP allow-listing (database ACL) via `allowed_ips`
-- Optional subnet-level enforcement by creating an NSG that mirrors `allowed_ips` (disabled by default)
-- Comprehensive outputs (IDs, connection info, endpoints, lifecycle)
+- ✅ **Automatic Password Generation** - Generates secure passwords meeting Oracle requirements
+- ✅ **Azure Key Vault Integration** - Optionally stores admin password in Key Vault
+- ✅ **Comprehensive Configuration** - Supports all ADB configuration options
+- ✅ **Network Security** - Optional NSG creation with IP allowlisting
+- ✅ **Long-term Backups** - Configurable backup schedules
+- ✅ **Auto-scaling** - Support for compute and storage auto-scaling
+- ✅ **Input Validation** - Extensive validation for all inputs
 
 ## Requirements
 
-| Name | Version |
-|------|---------|
-| terraform | >= 1.0 |
-| azurerm | ~> 4.0 |
-
-## Providers
-
-| Name | Version |
-|------|---------|
-| azurerm | ~> 4.0 |
-
-## Module structure
-
-```text
-oracle-adb-azure-module/
-  providers.tf
-  variables.tf
-  main.tf
-  outputs.tf
-  README.md
-  examples/
-    basic/
-      main.tf
-    complete/
-      main.tf
-```
+- Terraform >= 1.14.3
+- Azure Provider >= 4.58.0
+- Random Provider >= 3.6
 
 ## Usage
 
-### Basic example
+### Basic Example - Auto-generated Password
 
 ```hcl
-module "autonomous_database" {
-  source = "path/to/oracle-adb-azure-module"
+module "oracle_adb" {
+  source = "./path-to-module"
 
-  name                = "mydb01"
-  resource_group_name = "rg-oracle-prod"
+  name                = "myoracledb"
+  resource_group_name = "my-rg"
   location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
 
-  admin_password = var.admin_password
+  # Password will be auto-generated
+  generate_admin_password = true
 
-  subnet_id          = azurerm_subnet.delegated.id
-  virtual_network_id = azurerm_virtual_network.main.id
-
-  # Required
-  national_character_set = "AL16UTF16"
+  # Database configuration
+  compute_model            = "ECPU"
+  compute_count            = 4
+  data_storage_size_in_tbs = 2
+  db_version               = "19c"
+  db_workload              = "OLTP"
 
   tags = {
-    Environment = "Production"
+    environment = "production"
+    application = "my-app"
+  }
+}
+
+# Access the generated password
+output "db_password" {
+  value     = module.oracle_adb.admin_password
+  sensitive = true
+}
+```
+
+### Example with Key Vault Secret Storage
+
+```hcl
+# Existing Key Vault
+data "azurerm_key_vault" "main" {
+  name                = "my-keyvault"
+  resource_group_name = "my-rg"
+}
+
+module "oracle_adb" {
+  source = "./path-to-module"
+
+  name                = "myoracledb"
+  resource_group_name = "my-rg"
+  location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
+
+  # Auto-generate password and store in Key Vault
+  generate_admin_password = true
+  create_key_vault_secret = true
+  key_vault_id            = data.azurerm_key_vault.main.id
+  key_vault_secret_name   = "oracle-admin-password"
+
+  # Optional: Set expiration
+  key_vault_secret_expiration_date = "2027-02-12T00:00:00Z"
+
+  tags = {
+    environment = "production"
+  }
+}
+
+# Reference the Key Vault secret
+output "kv_secret_id" {
+  value = module.oracle_adb.key_vault_secret_id
+}
+```
+
+### Example with Custom Password
+
+```hcl
+module "oracle_adb" {
+  source = "./path-to-module"
+
+  name                = "myoracledb"
+  resource_group_name = "my-rg"
+  location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
+
+  # Provide your own password
+  admin_password          = var.db_admin_password
+  generate_admin_password = false
+
+  # Store in Key Vault
+  create_key_vault_secret = true
+  key_vault_id            = data.azurerm_key_vault.main.id
+
+  tags = {
+    environment = "production"
   }
 }
 ```
 
-## Notes
+### Example with Network Security and IP Allowlist
 
-- The subnet must be delegated to `Oracle.Database/networkAttachments`.
-- If you enable `create_nsg_for_allowed_ips`, the module creates an NSG and associates it with the provided subnet.
+```hcl
+module "oracle_adb" {
+  source = "./path-to-module"
 
-## Inputs
+  name                = "myoracledb"
+  resource_group_name = "my-rg"
+  location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
 
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| name | Name of the Autonomous Database (alphanumeric only, max 30 characters) | `string` | n/a | yes |
-| resource_group_name | Name of the Azure resource group | `string` | n/a | yes |
-| location | Azure region (e.g., eastus, westeurope) | `string` | n/a | yes |
-| admin_password | Admin password (12-30 chars, must include uppercase, lowercase, number, and special char) | `string` | n/a | yes |
-| subnet_id | Azure subnet ID (must be delegated to Oracle.Database/networkAttachments) | `string` | n/a | yes |
-| virtual_network_id | Azure Virtual Network resource ID | `string` | n/a | yes |
-| display_name | User-friendly display name for the Autonomous Database | `string` | `null` | no |
-| compute_model | Compute model: ECPU or OCPU | `string` | `"ECPU"` | no |
-| compute_count | Number of ECPU/OCPU cores | `number` | `2` | no |
-| data_storage_size_in_tbs | Storage size in terabytes | `number` | `1` | no |
-| db_version | Oracle Database version (e.g., 19c, 21c, 23ai) | `string` | `"19c"` | no |
-| db_workload | Workload type: OLTP, DW, AJD, APEX | `string` | `"OLTP"` | no |
-| license_model | License model: LicenseIncluded or BringYourOwnLicense | `string` | `"LicenseIncluded"` | no |
-| auto_scaling_enabled | Enable auto scaling for compute resources | `bool` | `false` | no |
-| auto_scaling_for_storage_enabled | Enable auto scaling for storage | `bool` | `false` | no |
-| backup_retention_period_in_days | Backup retention period in days (1-60) | `number` | `7` | no |
-| character_set | Database character set | `string` | `"AL32UTF8"` | no |
-| national_character_set | National character set (e.g., AL16UTF16 or UTF8) | `string` | `"AL16UTF16"` | no *(resource-required)* |
-| mtls_connection_required | Require mutual TLS (mTLS) authentication for connections | `bool` | `false` | no |
-| allowed_ips | Client IP access control list (ACL) for the database (CIDR blocks) | `list(string)` | `[]` | no |
-| create_nsg_for_allowed_ips | If true and allowed_ips is non-empty, create an NSG and associate it to the subnet to allow inbound TCP/1522 | `bool` | `false` | no |
-| customer_contacts | List of customer email addresses for maintenance notifications (max 10) | `list(string)` | `[]` | no |
-| tags | Tags to apply to the resource | `map(string)` | `{}` | no |
+  # Security settings
+  mtls_connection_required = true
+  allowed_ips = [
+    "10.0.1.0/24",
+    "203.0.113.0/24"
+  ]
 
-> Note: Some fields may be required by the AzureRM resource even if a default is set in this module. In particular, `national_character_set` is required by the service; a default is provided for convenience.
+  # Create NSG with rules for allowed IPs
+  create_nsg_for_allowed_ips = true
+
+  tags = {
+    environment = "production"
+  }
+}
+```
+
+### Example with Auto-scaling and Long-term Backups
+
+```hcl
+module "oracle_adb" {
+  source = "./path-to-module"
+
+  name                = "myoracledb"
+  resource_group_name = "my-rg"
+  location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
+
+  # Auto-scaling
+  auto_scaling_enabled             = true
+  auto_scaling_for_storage_enabled = true
+
+  # Backup configuration
+  backup_retention_period_in_days = 30
+
+  long_term_backup_schedules = [
+    {
+      repeat_cadence           = "Weekly"
+      time_of_backup           = "2026-03-01T02:00:00Z"
+      retention_period_in_days = 180
+      enabled                  = true
+    },
+    {
+      repeat_cadence           = "Monthly"
+      time_of_backup           = "2026-03-01T03:00:00Z"
+      retention_period_in_days = 365
+      enabled                  = true
+    }
+  ]
+
+  tags = {
+    environment = "production"
+  }
+}
+```
+
+### Data Warehouse Workload Example
+
+```hcl
+module "oracle_dw" {
+  source = "./path-to-module"
+
+  name                = "myoracledw"
+  resource_group_name = "my-rg"
+  location            = "eastus"
+  subnet_id           = azurerm_subnet.oracle.id
+  virtual_network_id  = azurerm_virtual_network.main.id
+
+  # Data Warehouse configuration
+  db_workload              = "DW"
+  compute_model            = "OCPU"
+  compute_count            = 8
+  data_storage_size_in_tbs = 5
+
+  # DW typically benefits from auto-scaling
+  auto_scaling_enabled             = true
+  auto_scaling_for_storage_enabled = true
+
+  license_model = "BringYourOwnLicense"
+
+  tags = {
+    environment = "production"
+    workload    = "analytics"
+  }
+}
+```
+
+## Input Variables
+
+### Required Variables
+
+| Name | Type | Description |
+|------|------|-------------|
+| `name` | `string` | Database name (alphanumeric, max 30 chars) |
+| `resource_group_name` | `string` | Azure resource group name |
+| `location` | `string` | Azure region |
+| `subnet_id` | `string` | Subnet ID (must be delegated to Oracle.Database/networkAttachments) |
+| `virtual_network_id` | `string` | Virtual Network resource ID |
+
+### Password Management
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `admin_password` | `string` | `null` | Admin password (12-30 chars with complexity) |
+| `generate_admin_password` | `bool` | `true` | Generate random password if not provided |
+| `generated_password_length` | `number` | `20` | Length of auto-generated password (12-30) |
+
+### Key Vault Integration
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `create_key_vault_secret` | `bool` | `false` | Store password in Key Vault |
+| `key_vault_id` | `string` | `null` | Key Vault resource ID |
+| `key_vault_secret_name` | `string` | `null` | Secret name (defaults to `{db_name}-admin-password`) |
+| `key_vault_secret_content_type` | `string` | `"password"` | Secret content type |
+| `key_vault_secret_expiration_date` | `string` | `null` | Expiration date (RFC3339 format) |
+| `key_vault_secret_tags` | `map(string)` | `{}` | Additional tags for the secret |
+
+### Database Configuration
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `display_name` | `string` | `null` | User-friendly display name |
+| `compute_model` | `string` | `"ECPU"` | Compute model (ECPU or OCPU) |
+| `compute_count` | `number` | `2` | Number of cores |
+| `data_storage_size_in_tbs` | `number` | `1` | Storage size in TB |
+| `db_version` | `string` | `"19c"` | Database version (19c, 21c, 23ai) |
+| `db_workload` | `string` | `"OLTP"` | Workload type (OLTP, DW, AJD, APEX) |
+| `license_model` | `string` | `"LicenseIncluded"` | License model |
+| `auto_scaling_enabled` | `bool` | `false` | Enable compute auto-scaling |
+| `auto_scaling_for_storage_enabled` | `bool` | `false` | Enable storage auto-scaling |
+
+### Backup Configuration
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `backup_retention_period_in_days` | `number` | `7` | Backup retention (1-60 days) |
+| `long_term_backup_schedules` | `list(object)` | `[]` | Long-term backup configurations |
+
+### Network Security
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `mtls_connection_required` | `bool` | `false` | Require mutual TLS |
+| `allowed_ips` | `list(string)` | `[]` | Client IP allowlist (CIDR blocks) |
+| `create_nsg_for_allowed_ips` | `bool` | `false` | Create NSG for IP allowlist |
+
+### Other Variables
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `character_set` | `string` | `"AL32UTF8"` | Database character set |
+| `national_character_set` | `string` | `"AL16UTF16"` | National character set |
+| `customer_contacts` | `list(string)` | `[]` | Email addresses for notifications (max 10) |
+| `tags` | `map(string)` | `{}` | Resource tags |
 
 ## Outputs
 
-| Name | Description |
-|------|-------------|
-| id | The Azure resource ID of the Autonomous Database |
-| name | The name of the Autonomous Database |
-| display_name | The display name of the Autonomous Database |
-| ocid | The Oracle Cloud ID (OCID) of the Autonomous Database |
-| connection_strings | Connection strings for different service levels (high, medium, low) *(sensitive)* |
-| connection_urls | Connection URLs for various Oracle tools and services |
-| service_console_url | URL for the Oracle Autonomous Database service console |
-| actual_used_data_storage_size_in_tbs | Actual used data storage size in terabytes |
-| allocated_storage_size_in_tbs | Allocated storage size in terabytes |
-| lifecycle_state | Current lifecycle state |
-| lifecycle_details | Additional lifecycle state details |
-| private_endpoint | Private endpoint for the database |
-| private_endpoint_ip | Private endpoint IP address |
-| private_endpoint_label | Private endpoint label |
-| time_created | Timestamp when the database was created |
-| time_maintenance_begin | Start time of the next maintenance window |
-| time_maintenance_end | End time of the next maintenance window |
-| nsg_id | ID of the optional NSG created for allowed_ips (null if not created) |
+### Database Outputs
 
-## Examples
+| Name | Description | Sensitive |
+|------|-------------|-----------|
+| `id` | Azure resource ID | No |
+| `name` | Database name | No |
+| `resource_group_name` | Resource group name | No |
+| `ocid` | Oracle Cloud Identifier | No |
+| `lifecycle_state` | Current lifecycle state | No |
+| `connection_strings` | Connection strings | Yes |
+| `connection_urls` | Connection URLs | Yes |
 
-- `examples/basic` – minimal configuration
-- `examples/complete` – full example
+### Password Outputs
+
+| Name | Description | Sensitive |
+|------|-------------|-----------|
+| `admin_password` | Admin password | Yes |
+| `password_generated` | Whether password was auto-generated | No |
+
+### Key Vault Outputs
+
+| Name | Description | Sensitive |
+|------|-------------|-----------|
+| `key_vault_secret_id` | Key Vault secret ID | No |
+| `key_vault_secret_name` | Secret name | No |
+| `key_vault_secret_version` | Secret version | No |
+| `key_vault_secret_versionless_id` | Versionless ID (latest) | No |
+
+### Network Outputs
+
+| Name | Description | Sensitive |
+|------|-------------|-----------|
+| `nsg_id` | NSG resource ID (if created) | No |
+| `subnet_id` | Subnet ID | No |
+
+## Password Requirements
+
+The admin password must meet the following requirements:
+
+- **Length**: 12-30 characters
+- **Uppercase**: At least 1 uppercase letter
+- **Lowercase**: At least 1 lowercase letter
+- **Number**: At least 1 digit
+- **Special Character**: At least 1 special character
+
+When auto-generating passwords, the module uses these characters for special characters: `!#$%&*()-_=+[]{}<>:?`
+
+## Key Vault Prerequisites
+
+To use Key Vault integration, ensure:
+
+1. The Key Vault exists and is accessible
+2. The Terraform service principal has permissions:
+   - `Key Vault Secrets Officer` role, or
+   - Access policy with `Set` and `Get` secret permissions
+3. The Key Vault has appropriate firewall rules
+
+## Network Prerequisites
+
+The subnet must be delegated to `Oracle.Database/networkAttachments`:
+
+```hcl
+resource "azurerm_subnet" "oracle" {
+  name                 = "oracle-subnet"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+
+  delegation {
+    name = "oracle-delegation"
+
+    service_delegation {
+      name = "Oracle.Database/networkAttachments"
+      actions = [
+        "Microsoft.Network/networkinterfaces/*",
+        "Microsoft.Network/virtualNetworks/subnets/join/action",
+      ]
+    }
+  }
+}
+```
+
+## License Models
+
+- **LicenseIncluded**: License is included in the service cost
+- **BringYourOwnLicense (BYOL)**: Use existing Oracle licenses (typically 50% cost savings)
+
+## Workload Types
+
+- **OLTP**: Optimized for transaction processing
+- **DW**: Optimized for data warehousing and analytics
+- **AJD**: Autonomous JSON Database
+- **APEX**: Oracle Application Express
+
+## Long-term Backup Schedules
+
+Example configuration:
+
+```hcl
+long_term_backup_schedules = [
+  {
+    repeat_cadence           = "Weekly"     # Weekly, Monthly, Yearly, OneTime
+    time_of_backup           = "2026-03-01T02:00:00Z"
+    retention_period_in_days = 180          # 90-2558 days
+    enabled                  = true
+  }
+]
+```
+
+**Important Notes:**
+- Maximum 10 schedules allowed
+- `repeat_cadence` is case-sensitive (use: Weekly, Monthly, Yearly, OneTime)
+- `time_of_backup` must be in ISO8601 format
+- Retention period: 90-2558 days
+
+## Security Recommendations
+
+1. **Enable mTLS**: Set `mtls_connection_required = true` for production
+2. **Use Key Vault**: Store passwords in Key Vault rather than Terraform state
+3. **Limit IPs**: Use `allowed_ips` to restrict database access
+4. **Auto-scaling**: Enable for production workloads to handle load spikes
+5. **Backups**: Configure both standard and long-term backups
+6. **Tags**: Use consistent tagging for cost tracking and governance
+
+## Cost Optimization
+
+1. **BYOL**: Use `BringYourOwnLicense` if you have existing Oracle licenses
+2. **Right-size**: Start with smaller `compute_count` and enable auto-scaling
+3. **ECPU vs OCPU**: ECPU is more cost-effective for variable workloads
+4. **Storage**: Don't over-provision; enable `auto_scaling_for_storage_enabled`
+
+## Troubleshooting
+
+### Password doesn't meet requirements
+Ensure your password includes uppercase, lowercase, number, and special character.
+
+### Key Vault access denied
+Check that the service principal has appropriate permissions on the Key Vault.
+
+### Subnet delegation error
+Verify the subnet is delegated to `Oracle.Database/networkAttachments`.
+
+### NSG association conflict
+If the subnet already has an NSG, set `create_nsg_for_allowed_ips = false` and manage NSG separately.
 
 ## License
 
-MIT
+This module is licensed under the MIT License.
+
+## Authors
+
+Maintained by your team/organization.
+
+## Support
+
+For issues and questions:
+- Check Azure documentation for Oracle Database@Azure
+- Review Terraform azurerm provider documentation
+- Open an issue in the repository

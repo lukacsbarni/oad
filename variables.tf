@@ -22,13 +22,25 @@ variable "location" {
   type        = string
 }
 
+variable "subnet_id" {
+  description = "Azure subnet ID (must be delegated to Oracle.Database/networkAttachments)"
+  type        = string
+}
+
+variable "virtual_network_id" {
+  description = "Azure Virtual Network resource ID"
+  type        = string
+}
+
+# ==================== PASSWORD MANAGEMENT ====================
 variable "admin_password" {
-  description = "Admin password (12-30 chars, must include uppercase, lowercase, number, and special char)"
+  description = "Admin password (12-30 chars, must include uppercase, lowercase, number, and special char). If null, a random password will be generated."
   type        = string
   sensitive   = true
+  default     = null
 
   validation {
-    condition = (
+    condition = var.admin_password == null || (
       length(var.admin_password) >= 12 &&
       length(var.admin_password) <= 30 &&
       can(regex("[a-z]", var.admin_password)) &&
@@ -41,15 +53,65 @@ variable "admin_password" {
   }
 }
 
-
-variable "subnet_id" {
-  description = "Azure subnet ID (must be delegated to Oracle.Database/networkAttachments)"
-  type        = string
+variable "generate_admin_password" {
+  description = "Generate a random admin password if admin_password is not provided"
+  type        = bool
+  default     = true
 }
 
-variable "virtual_network_id" {
-  description = "Azure Virtual Network resource ID"
+variable "generated_password_length" {
+  description = "Length of auto-generated password (12-30)"
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.generated_password_length >= 12 && var.generated_password_length <= 30
+    error_message = "generated_password_length must be between 12 and 30."
+  }
+}
+
+# ==================== KEY VAULT INTEGRATION ====================
+variable "create_key_vault_secret" {
+  description = "Create a Key Vault secret for the admin password"
+  type        = bool
+  default     = false
+}
+
+variable "key_vault_id" {
+  description = "Azure Key Vault ID where the admin password secret will be stored (required if create_key_vault_secret is true)"
   type        = string
+  default     = null
+}
+
+variable "key_vault_secret_name" {
+  description = "Name of the Key Vault secret (defaults to '{db_name}-admin-password')"
+  type        = string
+  default     = null
+}
+
+variable "key_vault_secret_content_type" {
+  description = "Content type for the Key Vault secret"
+  type        = string
+  default     = "password"
+}
+
+variable "key_vault_secret_expiration_date" {
+  description = "Expiration date for the Key Vault secret in RFC3339 format (e.g., '2027-02-12T00:00:00Z')"
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.key_vault_secret_expiration_date == null || can(
+      regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", var.key_vault_secret_expiration_date)
+    )
+    error_message = "key_vault_secret_expiration_date must be in RFC3339 format: YYYY-MM-DDTHH:MM:SSZ"
+  }
+}
+
+variable "key_vault_secret_tags" {
+  description = "Additional tags for the Key Vault secret (merged with main tags)"
+  type        = map(string)
+  default     = {}
 }
 
 # ==================== BASIC CONFIGURATION ====================
@@ -131,6 +193,60 @@ variable "backup_retention_period_in_days" {
   }
 }
 
+variable "long_term_backup_schedules" {
+  description = <<EOT
+List of long-term backup schedule configurations.
+Fields:
+- repeat_cadence: Weekly | Monthly | Yearly | OneTime (check Azure docs for exact casing)
+- time_of_backup: ISO8601 datetime (e.g., 2026-02-12T00:09:00Z or 2026-02-12T00:09:00+02:00)
+- retention_period_in_days: 90-2558 days
+- enabled: true/false
+
+Maximum 10 schedules allowed.
+EOT
+
+  type = list(object({
+    repeat_cadence           = string
+    time_of_backup           = string
+    retention_period_in_days = number
+    enabled                  = bool
+  }))
+
+  default = []
+
+  validation {
+    condition = alltrue([
+      for s in var.long_term_backup_schedules :
+      contains(["Weekly", "Monthly", "Yearly", "OneTime"], s.repeat_cadence)
+    ])
+    error_message = "repeat_cadence must be exactly: Weekly, Monthly, Yearly, or OneTime (case-sensitive)."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.long_term_backup_schedules :
+      s.retention_period_in_days >= 90 && s.retention_period_in_days <= 2558
+    ])
+    error_message = "retention_period_in_days must be between 90 and 2558."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.long_term_backup_schedules :
+      can(regex(
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$",
+        s.time_of_backup
+      ))
+    ])
+    error_message = "time_of_backup must be ISO8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SS±HH:MM"
+  }
+
+  validation {
+    condition     = length(var.long_term_backup_schedules) <= 10
+    error_message = "Maximum 10 long-term backup schedules allowed."
+  }
+}
+
 # ==================== CHARACTER SETS ====================
 variable "character_set" {
   description = "Database character set"
@@ -157,7 +273,6 @@ variable "allowed_ips" {
   default     = []
 }
 
-# Optional: also create an NSG on the delegated subnet allowing TCP/1522 from allowed_ips
 variable "create_nsg_for_allowed_ips" {
   description = "If true and allowed_ips is non-empty, create an NSG and associate it to the subnet to allow inbound TCP/1522."
   type        = bool
