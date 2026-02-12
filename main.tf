@@ -68,7 +68,7 @@ resource "azurerm_oracle_autonomous_database" "this" {
   tags                             = var.tags
 
   dynamic "long_term_backup_schedule" {
-    for_each = var.long_term_backup_schedules
+    for_each = var.long_term_backup_schedule != null ? [var.long_term_backup_schedule] : []
 
     content {
       repeat_cadence           = long_term_backup_schedule.value.repeat_cadence

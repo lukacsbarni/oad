@@ -42,6 +42,9 @@ module "oracle_adb" {
   db_version               = "19c"
   db_workload              = "OLTP"
 
+  # No long-term backup schedule specified - it's optional
+  # Standard backups (7 days retention) are still active
+
   tags = {
     environment = "production"
     application = "my-app"
@@ -147,7 +150,7 @@ module "oracle_adb" {
 }
 ```
 
-### Example with Auto-scaling and Long-term Backups
+### Example with Auto-scaling and Long-term Backup
 
 ```hcl
 module "oracle_adb" {
@@ -166,20 +169,13 @@ module "oracle_adb" {
   # Backup configuration
   backup_retention_period_in_days = 30
 
-  long_term_backup_schedules = [
-    {
-      repeat_cadence           = "Weekly"
-      time_of_backup           = "2026-03-01T02:00:00Z"
-      retention_period_in_days = 180
-      enabled                  = true
-    },
-    {
-      repeat_cadence           = "Monthly"
-      time_of_backup           = "2026-03-01T03:00:00Z"
-      retention_period_in_days = 365
-      enabled                  = true
-    }
-  ]
+  # Long-term backup schedule (only one allowed)
+  long_term_backup_schedule = {
+    repeat_cadence           = "Weekly"
+    time_of_backup           = "2026-03-01T02:00:00Z"
+    retention_period_in_days = 180
+    enabled                  = true
+  }
 
   tags = {
     environment = "production"
@@ -268,7 +264,7 @@ module "oracle_dw" {
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `backup_retention_period_in_days` | `number` | `7` | Backup retention (1-60 days) |
-| `long_term_backup_schedules` | `list(object)` | `[]` | Long-term backup configurations |
+| `long_term_backup_schedule` | `object` | `null` | Long-term backup configuration (only one allowed) |
 
 ### Network Security
 
@@ -383,26 +379,33 @@ resource "azurerm_subnet" "oracle" {
 - **AJD**: Autonomous JSON Database
 - **APEX**: Oracle Application Express
 
-## Long-term Backup Schedules
+## Long-term Backup Schedule
+
+**Note: Only one long-term backup schedule is allowed.**
 
 Example configuration:
 
 ```hcl
-long_term_backup_schedules = [
-  {
-    repeat_cadence           = "Weekly"     # Weekly, Monthly, Yearly, OneTime
-    time_of_backup           = "2026-03-01T02:00:00Z"
-    retention_period_in_days = 180          # 90-2558 days
-    enabled                  = true
-  }
-]
+long_term_backup_schedule = {
+  repeat_cadence           = "Weekly"     # Weekly, Monthly, Yearly, OneTime
+  time_of_backup           = "2026-03-01T02:00:00Z"
+  retention_period_in_days = 180          # 90-2558 days
+  enabled                  = true
+}
+```
+
+If you don't want long-term backups, simply **omit the variable** (the default is `null`):
+```hcl
+# No need to set anything - just don't include long_term_backup_schedule
+# The variable defaults to null, which disables long-term backups
 ```
 
 **Important Notes:**
-- Maximum 10 schedules allowed
+- Only one schedule can be configured
 - `repeat_cadence` is case-sensitive (use: Weekly, Monthly, Yearly, OneTime)
 - `time_of_backup` must be in ISO8601 format
 - Retention period: 90-2558 days
+- **Optional**: If not specified, long-term backups are disabled
 
 ## Security Recommendations
 

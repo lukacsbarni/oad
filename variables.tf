@@ -193,57 +193,48 @@ variable "backup_retention_period_in_days" {
   }
 }
 
-variable "long_term_backup_schedules" {
+variable "long_term_backup_schedule" {
   description = <<EOT
-List of long-term backup schedule configurations.
+Long-term backup schedule configuration (only one schedule allowed).
 Fields:
-- repeat_cadence: Weekly | Monthly | Yearly | OneTime (check Azure docs for exact casing)
+- repeat_cadence: Weekly | Monthly | Yearly | OneTime (case-sensitive)
 - time_of_backup: ISO8601 datetime (e.g., 2026-02-12T00:09:00Z or 2026-02-12T00:09:00+02:00)
 - retention_period_in_days: 90-2558 days
 - enabled: true/false
 
-Maximum 10 schedules allowed.
+Set to null to disable long-term backup schedule.
 EOT
 
-  type = list(object({
+  type = object({
     repeat_cadence           = string
     time_of_backup           = string
     retention_period_in_days = number
     enabled                  = bool
-  }))
+  })
 
-  default = []
+  default = null
 
   validation {
-    condition = alltrue([
-      for s in var.long_term_backup_schedules :
-      contains(["Weekly", "Monthly", "Yearly", "OneTime"], s.repeat_cadence)
-    ])
+    condition = var.long_term_backup_schedule == null || (
+      contains(["Weekly", "Monthly", "Yearly", "OneTime"], var.long_term_backup_schedule.repeat_cadence)
+    )
     error_message = "repeat_cadence must be exactly: Weekly, Monthly, Yearly, or OneTime (case-sensitive)."
   }
 
   validation {
-    condition = alltrue([
-      for s in var.long_term_backup_schedules :
-      s.retention_period_in_days >= 90 && s.retention_period_in_days <= 2558
-    ])
+    condition = var.long_term_backup_schedule == null || (
+      var.long_term_backup_schedule.retention_period_in_days >= 90 && 
+      var.long_term_backup_schedule.retention_period_in_days <= 2558
+    )
     error_message = "retention_period_in_days must be between 90 and 2558."
   }
 
   validation {
-    condition = alltrue([
-      for s in var.long_term_backup_schedules :
-      can(regex(
-        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$",
-        s.time_of_backup
-      ))
-    ])
+    condition = var.long_term_backup_schedule == null || can(regex(
+      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$",
+      var.long_term_backup_schedule.time_of_backup
+    ))
     error_message = "time_of_backup must be ISO8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SS±HH:MM"
-  }
-
-  validation {
-    condition     = length(var.long_term_backup_schedules) <= 10
-    error_message = "Maximum 10 long-term backup schedules allowed."
   }
 }
 
